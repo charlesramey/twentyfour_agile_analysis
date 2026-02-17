@@ -34,6 +34,7 @@ from scipy.io import wavfile
 from scipy.signal import fftconvolve, correlate
 from ultralytics import YOLO
 from pathlib import Path
+from tqdm import tqdm
 
 # --- Configuration ---
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
@@ -248,11 +249,19 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12s.pt
     writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
 
     # Calculate initial frames to skip
+    start_frames = []
+    total_frames = int(caps[0].get(cv2.CAP_PROP_FRAME_COUNT))
+
     for i, cap in enumerate(caps):
         # Time in cam[i] at start_time_cam0
         t_cam_i = start_time_cam0 - offsets[i]
         start_frame = int(t_cam_i * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        start_frames.append(start_frame)
+
+    # Estimate frames to process (based on shortest video remaining)
+    # This is an approximation since videos might end at different times
+    frames_to_process = total_frames - start_frames[0]
 
     # Smoothing parameters
     MIN_SWITCH_FRAMES = 15 # ~0.5s at 30fps
@@ -264,6 +273,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12s.pt
 
     try:
         frame_idx = 0
+        pbar = tqdm(total=frames_to_process, unit="frames")
         while True:
             frames = []
             for cap in caps:
@@ -312,8 +322,9 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12s.pt
             writer.write(out_frame)
 
             frame_idx += 1
-            if frame_idx % 100 == 0:
-                print(f"Processed {frame_idx} frames...")
+            pbar.update(1)
+
+        pbar.close()
 
     finally:
         writer.release()
