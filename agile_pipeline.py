@@ -21,6 +21,7 @@ import os
 import sys
 import glob
 import re
+import argparse
 import numpy as np
 import pandas as pd
 import cv2
@@ -29,31 +30,12 @@ import subprocess
 import shutil
 import tempfile
 import warnings
-import imageio_ffmpeg
 from scipy.io import wavfile
 from scipy.signal import fftconvolve, correlate
 from ultralytics import YOLO
 from pathlib import Path
 
 # --- Configuration ---
-FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-
-# Setup ffmpeg in PATH for Whisper
-# Create a temp dir, symlink imageio_ffmpeg binary to "ffmpeg", add to PATH
-_ffmpeg_dir = os.path.join(tempfile.gettempdir(), "ffmpeg_bin")
-os.makedirs(_ffmpeg_dir, exist_ok=True)
-_symlink_path = os.path.join(_ffmpeg_dir, "ffmpeg")
-if not os.path.exists(_symlink_path):
-    try:
-        os.symlink(FFMPEG_EXE, _symlink_path)
-    except OSError:
-        # If symlink fails (windows?), try copy
-        shutil.copy(FFMPEG_EXE, _symlink_path)
-        # Ensure executable
-        os.chmod(_symlink_path, 0o755)
-
-os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ["PATH"]
-
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
 COLLAR_DIR = 'Collar Data'
 PROCESSED_DIR = 'ProcessedData'
@@ -83,7 +65,7 @@ def run_cmd(cmd, check=True):
 
 def extract_audio(video_path, wav_path, sr=SAMPLERATE):
     run_cmd([
-        FFMPEG_EXE, "-y", "-i", video_path, "-vn", "-ac", "1",
+        "ffmpeg", "-y", "-i", video_path, "-vn", "-ac", "1",
         "-ar", str(sr), "-acodec", "pcm_s16le", wav_path
     ])
 
@@ -171,7 +153,7 @@ def sync_imu_to_video(video_path, csv_path, output_path):
         audio_wav = os.path.join(td, "temp_audio.wav")
         # Use 16000 for whisper
         subprocess.run([
-            FFMPEG_EXE, "-y", "-i", video_path, "-vn", "-ac", "1",
+            "ffmpeg", "-y", "-i", video_path, "-vn", "-ac", "1",
             "-ar", "16000", "-c:a", "pcm_s16le", audio_wav
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -368,13 +350,22 @@ def sanitize_name(name):
     return re.sub(r'[^a-zA-Z0-9]', '', str(name))
 
 def main():
+    parser = argparse.ArgumentParser(description="Agile Data Processing Pipeline")
+    parser.add_argument("-n", "--num-runs", type=int, help="Limit the number of processed completions (runs).")
+    args = parser.parse_args()
+
     if not os.path.exists(EXCEL_FILE):
         print(f"Excel file {EXCEL_FILE} not found.")
         return
 
     xls = pd.ExcelFile(EXCEL_FILE)
 
+    processed_count = 0
+
     for sheet_name in xls.sheet_names:
+        if args.num_runs is not None and processed_count >= args.num_runs:
+            break
+
         if sheet_name not in SHEET_TO_COURSE_DIR:
             print(f"Skipping unknown sheet: {sheet_name}")
             continue
@@ -398,10 +389,15 @@ def main():
             continue
 
         for idx, row in df.iterrows():
+            if args.num_runs is not None and processed_count >= args.num_runs:
+                break
+
             dog_name = row.get('Dog')
             if pd.isna(dog_name): continue
 
             print(f"--- Processing {dog_name} - {sheet_name} ---")
+
+            processed_count += 1
 
             # 1. Resolve Video Paths
             video_paths = []
