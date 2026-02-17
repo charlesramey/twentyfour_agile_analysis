@@ -266,7 +266,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12s.pt
     # Smoothing parameters
     MIN_SWITCH_FRAMES = 15 # ~0.5s at 30fps
     HYSTERESIS = 0.1 # New cam must be 10% better to switch if current is good
-    LOW_CONF = 0.3 # If current cam is below this, switch more aggressively
+    DETECTION_THRESHOLD = 0.4 # Minimum confidence to consider detection valid
 
     current_cam_idx = 0
     frames_since_switch = MIN_SWITCH_FRAMES # Allow immediate switch at start
@@ -303,16 +303,15 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12s.pt
 
             frames_since_switch += 1
 
-            if frames_since_switch >= MIN_SWITCH_FRAMES:
+            # Only consider switching if the best candidate actually sees a dog (conf > threshold)
+            # Otherwise, we stick with the last known good camera (current_cam_idx)
+            if best_raw_conf > DETECTION_THRESHOLD and frames_since_switch >= MIN_SWITCH_FRAMES:
                 if best_raw_idx != current_cam_idx:
-                    # Switch if significantly better OR current is bad
-                    if (best_raw_conf > current_conf + HYSTERESIS) or (current_conf < LOW_CONF):
+                    # Switch if significantly better than current
+                    # OR if current detection is lost (< threshold) but new best is good (> threshold)
+                    if (best_raw_conf > current_conf + HYSTERESIS) or (current_conf < DETECTION_THRESHOLD):
                         current_cam_idx = best_raw_idx
                         frames_since_switch = 0
-
-            # Fallback: if even best is super low (e.g. tunnel), maybe stick to last known good?
-            # Current logic will pick "best of bad" if it switches, or stick to "current bad".
-            # This is acceptable.
 
             # Write best frame
             out_frame = frames[current_cam_idx]
