@@ -31,6 +31,7 @@ import shutil
 import tempfile
 import warnings
 import traceback
+import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from scipy.signal import fftconvolve, correlate
 from ultralytics import YOLO
@@ -328,6 +329,27 @@ def sync_imu_to_video(video_path, csv_path, output_path):
             best_lag_idx = np.argmax(corr)
             best_imu_sync_time = imu_time.iloc[best_lag_idx]
 
+            # Debug Plot for IMU Sync
+            try:
+                debug_plot_path = output_path.replace(".csv", "_sync_debug.png")
+                plt.figure(figsize=(10, 6))
+                plt.subplot(2, 1, 1)
+                plt.plot(imu_time.iloc[:len(imu_segment)], imu_segment, label='IMU Mag (Centered)')
+                plt.title(f"IMU Signal vs Audio Template (Best Lag: {best_lag_idx})")
+                plt.legend()
+
+                plt.subplot(2, 1, 2)
+                lags = np.arange(len(corr))
+                plt.plot(lags, corr, label='Correlation')
+                plt.axvline(best_lag_idx, color='r', linestyle='--', label='Best Lag')
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(debug_plot_path)
+                plt.close()
+                print(f"Saved IMU sync debug plot to {debug_plot_path}")
+            except Exception as e:
+                print(f"Failed to save IMU debug plot: {e}")
+
             # Calculate shift
             # Audio tap time (relative to first tap) is 0
             # IMU tap time is best_imu_sync_time
@@ -452,6 +474,9 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
     current_cam_idx = 0
     frames_since_switch = MIN_SWITCH_FRAMES # Allow immediate switch at start
 
+    # Debug logging
+    frame_log = [] # List of dicts: {frame: i, cam1: c1, ..., selected: idx}
+
     try:
         frame_idx = 0
         pbar = tqdm(total=frames_to_process, unit="frames")
@@ -495,6 +520,15 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
                             current_cam_idx = best_raw_idx
                             frames_since_switch = 0
 
+            # Log data
+            log_entry = {
+                'Frame': frame_idx,
+                'Selected_Cam': current_cam_idx + 1
+            }
+            for ci, c_conf in enumerate(confidences):
+                log_entry[f'Cam{ci+1}_Conf'] = c_conf
+            frame_log.append(log_entry)
+
             # Write best frame
             out_frame = frames[current_cam_idx]
             # Annotate
@@ -506,6 +540,45 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
             pbar.update(1)
 
         pbar.close()
+
+        # Save logs and plot
+        try:
+            log_df = pd.DataFrame(frame_log)
+            log_csv_path = output_path.replace(".mp4", "_confidences.csv")
+            log_df.to_csv(log_csv_path, index=False)
+            print(f"Saved confidence log to {log_csv_path}")
+
+            # Plot
+            plot_path = output_path.replace(".mp4", "_confidences.png")
+            plt.figure(figsize=(12, 6))
+            for i in range(1, 5):
+                col = f'Cam{i}_Conf'
+                if col in log_df.columns:
+                    plt.plot(log_df['Frame'], log_df[col], label=f'Cam {i}', alpha=0.7)
+
+            # Overlay selected camera as a scatter or step?
+            # Maybe just plot the confidence of the selected camera in black
+            selected_confs = []
+            for _, row in log_df.iterrows():
+                sel = int(row['Selected_Cam'])
+                selected_confs.append(row[f'Cam{sel}_Conf'])
+
+            plt.plot(log_df['Frame'], selected_confs, 'k--', linewidth=1, label='Selected Cam Conf', alpha=0.5)
+
+            # Also plot which camera was selected on a secondary axis?
+            # Or just color the background? Let's keep it simple.
+
+            plt.title("YOLO Detection Confidence per Camera")
+            plt.xlabel("Frame")
+            plt.ylabel("Confidence")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(plot_path)
+            plt.close()
+            print(f"Saved confidence plot to {plot_path}")
+
+        except Exception as e:
+            print(f"Error saving confidence logs/plots: {e}")
 
     finally:
         writer.release()
