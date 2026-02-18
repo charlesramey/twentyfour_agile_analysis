@@ -43,13 +43,14 @@ from tqdm import tqdm
 FFMPEG_EXE = "ffmpeg"
 
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
-COLLAR_DIR = 'Collar Data'
-PROCESSED_DIR = 'ProcessedData'
+ROOT_DIR = ''
+COLLAR_DIR = f'{ROOT_DIR}Collar Data'
+PROCESSED_DIR = f'{ROOT_DIR}ProcessedData'
 VIDEO_DIRS = {
-    "1": "MMJ 1 GoPro",
-    "2": "MMJ 2 GoPro",
-    "3": "MMJ 3 GoPro",
-    "4": "MMJ 4 GoPro",
+    "1": f"{ROOT_DIR}MMJ 1 GoPro",
+    "2": f"{ROOT_DIR}MMJ 2 GoPro",
+    "3": f"{ROOT_DIR}MMJ 3 GoPro",
+    "4": f"{ROOT_DIR}MMJ 4 GoPro",
 }
 SHEET_TO_COURSE_DIR = {
     'MJWW': 'Masters JWW',
@@ -246,13 +247,10 @@ def sync_imu_to_video(video_path, csv_path, output_path):
             # Column Normalization
             # Ensure column 0 is treated as Timestamp
             df.rename(columns={df.columns[0]: 'Timestamp'}, inplace=True)
-
             # Normalize other columns
             df.columns = [str(c).strip() for c in df.columns]
-
             # Required columns (now excluding Timestamp as we forced it)
             required_cols = {'Ax', 'Ay', 'Az'}
-
             # Check if required columns are present
             missing = required_cols - set(df.columns)
             if missing:
@@ -407,7 +405,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
 
     # Try loading model with fallbacks
     model = None
-    try_models = [model_name, "yolo12l.pt", "yolo11x.pt", "yolo11l.pt", "yolov8x.pt"]
+    try_models = [model_name, "yolo26x-cls.pt", "yolo11x.pt", "yolo11l.pt", "yolov8x.pt"]
 
     for m in try_models:
         try:
@@ -494,7 +492,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
             for cam_idx, frame in enumerate(frames):
                 # Run inference
                 # 16 is dog in COCO
-                results = model(frame, verbose=False, classes=[16])
+                results = model(frame, verbose=False, classes=[15,16,17,18,19,20,21,22,23,24])
 
                 # Check confidence
                 conf = 0.0
