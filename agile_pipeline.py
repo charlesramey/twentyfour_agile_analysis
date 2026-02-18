@@ -30,6 +30,7 @@ import subprocess
 import shutil
 import tempfile
 import warnings
+import imageio_ffmpeg
 from scipy.io import wavfile
 from scipy.signal import fftconvolve, correlate
 from ultralytics import YOLO
@@ -37,6 +38,24 @@ from pathlib import Path
 from tqdm import tqdm
 
 # --- Configuration ---
+FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+
+# Setup ffmpeg in PATH for Whisper
+# Create a temp dir, symlink imageio_ffmpeg binary to "ffmpeg", add to PATH
+_ffmpeg_dir = os.path.join(tempfile.gettempdir(), "ffmpeg_bin")
+os.makedirs(_ffmpeg_dir, exist_ok=True)
+_symlink_path = os.path.join(_ffmpeg_dir, "ffmpeg")
+if not os.path.exists(_symlink_path):
+    try:
+        os.symlink(FFMPEG_EXE, _symlink_path)
+    except OSError:
+        # If symlink fails (windows?), try copy
+        shutil.copy(FFMPEG_EXE, _symlink_path)
+        # Ensure executable
+        os.chmod(_symlink_path, 0o755)
+
+os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ["PATH"]
+
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
 COLLAR_DIR = 'Collar Data'
 PROCESSED_DIR = 'ProcessedData'
@@ -66,7 +85,7 @@ def run_cmd(cmd, check=True):
 
 def extract_audio(video_path, wav_path, sr=SAMPLERATE):
     run_cmd([
-        "ffmpeg", "-y", "-i", video_path, "-vn", "-ac", "1",
+        FFMPEG_EXE, "-y", "-i", video_path, "-vn", "-ac", "1",
         "-ar", str(sr), "-acodec", "pcm_s16le", wav_path
     ])
 
@@ -154,7 +173,7 @@ def sync_imu_to_video(video_path, csv_path, output_path):
         audio_wav = os.path.join(td, "temp_audio.wav")
         # Use 16000 for whisper
         subprocess.run([
-            "ffmpeg", "-y", "-i", video_path, "-vn", "-ac", "1",
+            FFMPEG_EXE, "-y", "-i", video_path, "-vn", "-ac", "1",
             "-ar", "16000", "-c:a", "pcm_s16le", audio_wav
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
