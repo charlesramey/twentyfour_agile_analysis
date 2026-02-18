@@ -250,7 +250,7 @@ def sync_imu_to_video(video_path, csv_path, output_path):
 
     if WHISPER_MODEL is None:
         print("Loading Whisper model...")
-        WHISPER_MODEL = whisper.load_model("medium.en")
+        WHISPER_MODEL = whisper.load_model("turbo")
 
     try:
         with tempfile.TemporaryDirectory() as td:
@@ -284,11 +284,16 @@ def sync_imu_to_video(video_path, csv_path, output_path):
             df = pd.read_csv(csv_path)
 
             # Column Normalization
-            df.columns = [str(c).strip() for c in df.columns]
-            required_cols = {'Timestamp', 'Ax', 'Ay', 'Az'}
+            # Ensure column 0 is treated as Timestamp
+            df.rename(columns={df.columns[0]: 'Timestamp'}, inplace=True)
 
-            # Check if required columns are present (case-insensitive check?)
-            # Let's verify exact case first, if not, try lower
+            # Normalize other columns
+            df.columns = [str(c).strip() for c in df.columns]
+
+            # Required columns (now excluding Timestamp as we forced it)
+            required_cols = {'Ax', 'Ay', 'Az'}
+
+            # Check if required columns are present
             missing = required_cols - set(df.columns)
             if missing:
                 # Try lower-case mapping
@@ -309,8 +314,11 @@ def sync_imu_to_video(video_path, csv_path, output_path):
 
             # Check timestamp monotonicity
             if not pd.api.types.is_numeric_dtype(df['Timestamp']):
-                print("Timestamp column is not numeric.")
-                return False
+                # Attempt to coerce
+                df['Timestamp'] = pd.to_numeric(df['Timestamp'], errors='coerce')
+                if df['Timestamp'].isna().all():
+                     print("Timestamp column is not numeric and could not be coerced.")
+                     return False
 
             dt_series = df['Timestamp'].diff()
             dt = dt_series.mean()
@@ -403,7 +411,7 @@ def sync_imu_to_video(video_path, csv_path, output_path):
         return False
 
 # --- YOLO Processing Helpers ---
-def process_video_yolo(video_paths, offsets, output_path, model_name="yolo11s.pt"):
+def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt"):
     print(f"Processing YOLO video to {output_path}...")
 
     # Resolve paths
@@ -418,7 +426,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo11s.pt
 
     # Try loading model with fallbacks
     model = None
-    try_models = [model_name, "yolo11n.pt", "yolov8s.pt", "yolov8n.pt"]
+    try_models = [model_name, "yolo12l.pt", "yolo11x.pt", "yolo11l.pt", "yolov8x.pt"]
 
     for m in try_models:
         try:
