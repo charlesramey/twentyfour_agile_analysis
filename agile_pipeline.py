@@ -31,10 +31,6 @@ import shutil
 import tempfile
 import warnings
 import traceback
-try:
-    import imageio_ffmpeg
-except ImportError:
-    imageio_ffmpeg = None
 from scipy.io import wavfile
 from scipy.signal import fftconvolve, correlate
 from ultralytics import YOLO
@@ -42,45 +38,8 @@ from pathlib import Path
 from tqdm import tqdm
 
 # --- Configuration ---
-# Prioritize system ffmpeg, fallback to imageio_ffmpeg
-FFMPEG_EXE = shutil.which("ffmpeg")
-if not FFMPEG_EXE and imageio_ffmpeg:
-    try:
-        FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-    except:
-        FFMPEG_EXE = None
-
-if not FFMPEG_EXE:
-    print("Error: ffmpeg not found in PATH or via imageio_ffmpeg.")
-    sys.exit(1)
-
-print(f"Using ffmpeg at: {FFMPEG_EXE}")
-
-# Setup ffmpeg in PATH for Whisper
-# Create a temp dir, symlink/copy ffmpeg binary to "ffmpeg", add to PATH
-_ffmpeg_dir = os.path.join(tempfile.gettempdir(), "ffmpeg_bin")
-os.makedirs(_ffmpeg_dir, exist_ok=True)
-_symlink_path = os.path.join(_ffmpeg_dir, "ffmpeg")
-
-# Clean up old link if exists
-if os.path.exists(_symlink_path):
-    try:
-        os.remove(_symlink_path)
-    except OSError:
-        pass
-
-try:
-    os.symlink(FFMPEG_EXE, _symlink_path)
-except OSError:
-    # If symlink fails (windows?), try copy
-    try:
-        shutil.copy(FFMPEG_EXE, _symlink_path)
-        # Ensure executable
-        os.chmod(_symlink_path, 0o755)
-    except Exception as e:
-        print(f"Warning: Could not setup ffmpeg symlink for Whisper: {e}")
-
-os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ["PATH"]
+# Use system ffmpeg
+FFMPEG_EXE = "ffmpeg"
 
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
 COLLAR_DIR = 'Collar Data'
