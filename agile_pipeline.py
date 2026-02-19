@@ -43,14 +43,13 @@ from tqdm import tqdm
 FFMPEG_EXE = "ffmpeg"
 
 EXCEL_FILE = '2024AgileCupMetadata_ScribeNotes_CameraInfo.xlsx'
-ROOT_DIR = ''
-COLLAR_DIR = f'{ROOT_DIR}Collar Data'
-PROCESSED_DIR = f'{ROOT_DIR}ProcessedData'
+COLLAR_DIR = 'Collar Data'
+PROCESSED_DIR = 'ProcessedData'
 VIDEO_DIRS = {
-    "1": f"{ROOT_DIR}MMJ 1 GoPro",
-    "2": f"{ROOT_DIR}MMJ 2 GoPro",
-    "3": f"{ROOT_DIR}MMJ 3 GoPro",
-    "4": f"{ROOT_DIR}MMJ 4 GoPro",
+    "1": "MMJ 1 GoPro",
+    "2": "MMJ 2 GoPro",
+    "3": "MMJ 3 GoPro",
+    "4": "MMJ 4 GoPro",
 }
 SHEET_TO_COURSE_DIR = {
     'MJWW': 'Masters JWW',
@@ -247,10 +246,13 @@ def sync_imu_to_video(video_path, csv_path, output_path):
             # Column Normalization
             # Ensure column 0 is treated as Timestamp
             df.rename(columns={df.columns[0]: 'Timestamp'}, inplace=True)
+
             # Normalize other columns
             df.columns = [str(c).strip() for c in df.columns]
+
             # Required columns (now excluding Timestamp as we forced it)
             required_cols = {'Ax', 'Ay', 'Az'}
+
             # Check if required columns are present
             missing = required_cols - set(df.columns)
             if missing:
@@ -405,7 +407,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
 
     # Try loading model with fallbacks
     model = None
-    try_models = [model_name, "yolo26x-cls.pt", "yolo11x.pt", "yolo11l.pt", "yolov8x.pt"]
+    try_models = [model_name, "yolo12l.pt", "yolo11x.pt", "yolo11l.pt", "yolov8x.pt"]
 
     for m in try_models:
         try:
@@ -436,7 +438,9 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
     width = int(caps[0].get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(caps[0].get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    # Create temp silent video path
+    temp_silent_path = output_path.replace(".mp4", "_silent.mp4")
+    writer = cv2.VideoWriter(temp_silent_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
 
     # Calculate initial frames to skip
     start_frames = []
@@ -492,7 +496,7 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
             for cam_idx, frame in enumerate(frames):
                 # Run inference
                 # 16 is dog in COCO
-                results = model(frame, verbose=False, classes=[15,16,17,18,19,20,21,22,23,24])
+                results = model(frame, verbose=False, classes=[16])
 
                 # Check confidence
                 conf = 0.0
@@ -582,6 +586,64 @@ def process_video_yolo(video_paths, offsets, output_path, model_name="yolo12x.pt
         writer.release()
         for cap in caps:
             cap.release()
+
+    # Combine audio from Cam 2 (index 1)
+    # The output video starts at `start_time_cam0` relative to Cam 0.
+    # Cam 2 starts at `offsets[1]` relative to Cam 0.
+    # So Cam 2 is at `start_time_cam0 - offsets[1]` when the output video starts.
+
+    # Note: offsets[i] is positive if cam[i] starts AFTER cam[0].
+    # So if offsets[1] = 2.0s, cam[1] starts 2s after cam[0].
+    # start_time_cam0 is max(offsets), e.g. 5.0s.
+    # At t=5.0s (video start), cam[1] is at (5.0 - 2.0) = 3.0s.
+    # We need to seek cam[1] to 3.0s.
+
+    if len(video_paths) > 1:
+        audio_src = video_paths[1] # Cam 2
+        # Calculate start time for audio source
+        audio_seek_time = max(0, start_time_cam0 - offsets[1])
+
+        print(f"Merging audio from {audio_src} starting at {audio_seek_time:.2f}s...")
+
+        # Build ffmpeg command
+        # We take the silent video as input 0
+        # We seek the audio source (input 1) to the correct start time
+        # map 0:v (video from silent file)
+        # map 1:a (audio from cam 2)
+
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", temp_silent_path,
+            "-ss", f"{audio_seek_time:.3f}",
+            "-i", audio_src,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-shortest",
+            output_path
+        ]
+
+        try:
+            # Run ffmpeg
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("Audio merge successful.")
+
+            # Cleanup silent file if successful
+            if os.path.exists(temp_silent_path):
+                os.remove(temp_silent_path)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error merging audio: {e}")
+            # If fail, keep the silent video but rename it to output path so process continues
+            if os.path.exists(temp_silent_path):
+                if os.path.exists(output_path):
+                    os.remove(output_path) # Clean up partial file
+                os.rename(temp_silent_path, output_path)
+    else:
+        # Fallback if only 1 cam or logic fails
+        if os.path.exists(temp_silent_path):
+             os.rename(temp_silent_path, output_path)
 
 # --- Main Pipeline ---
 def find_collar_file(dog_name, course_dir):
